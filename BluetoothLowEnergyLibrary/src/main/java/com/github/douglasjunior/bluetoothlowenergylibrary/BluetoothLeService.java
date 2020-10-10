@@ -52,6 +52,8 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.PriorityQueue;
+import java.util.Queue;
 import java.util.UUID;
 
 
@@ -68,6 +70,8 @@ public class BluetoothLeService extends BluetoothService {
     private BluetoothGatt bluetoothGatt;
     private BluetoothGattCharacteristic characteristicRxTx;
     private List<BluetoothGattCharacteristic> availableCharacteristics = new ArrayList<>();
+
+    private Queue<UUID> characteristicToWriteQueue = new PriorityQueue<>();
 
     private final byte[] readBuffer;
     private int readBufferIndex = 0;
@@ -114,8 +118,12 @@ public class BluetoothLeService extends BluetoothService {
             Log.v(TAG, "onCharacteristicRead: " + new String(data));
             if (BluetoothGatt.GATT_SUCCESS == status) {
                 characteristicCommunicator.onCharacteristicRead(characteristic.getUuid(), data);
+                if (!characteristicToWriteQueue.isEmpty()) {
+                    bluetoothGatt.readCharacteristic(getCharacteristicById(characteristicToWriteQueue.poll()));
+                }
             } else {
                 System.err.println("onCharacteristicRead error " + status);
+                characteristicToWriteQueue.poll();
             }
         }
 
@@ -436,13 +444,11 @@ public class BluetoothLeService extends BluetoothService {
         }
     }
 
-    public void readCharacteristics(@NonNull List<UUID> characteristicIdsToRead) throws CharacteristicException {
-        for (UUID characteristicId : characteristicIdsToRead) {
-            BluetoothGattCharacteristic characteristicToRead = getCharacteristicById(characteristicId);
-            if (characteristicToRead == null) {
-                throw new CharacteristicException("Characteristic not found with id: " + characteristicId.toString());
-            }
-            bluetoothGatt.readCharacteristic(characteristicToRead);
+    public void readCharacteristics(@NonNull List<UUID> characteristicIdsToRead) {
+        boolean queueWasEmpty = characteristicToWriteQueue.isEmpty();
+        characteristicToWriteQueue.addAll(characteristicIdsToRead);
+        if (queueWasEmpty) {
+            bluetoothGatt.readCharacteristic(getCharacteristicById(characteristicToWriteQueue.poll()));
         }
     }
 
