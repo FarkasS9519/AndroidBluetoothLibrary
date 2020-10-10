@@ -443,9 +443,17 @@ public class BluetoothLeService extends BluetoothService {
         }
     }
 
-    public void readCharacteristics(@NonNull List<UUID> characteristicIdsToRead) {
+    public void readCharacteristics(@NonNull List<UUID> characteristicIdsToRead) throws CharacteristicException {
         boolean queueWasEmpty = characteristicToWriteQueue.isEmpty();
-        characteristicToWriteQueue.addAll(characteristicIdsToRead);
+        for (UUID charId : characteristicIdsToRead) {
+            BluetoothGattCharacteristic characteristic = getCharacteristicById(charId);
+            if (characteristic == null) {
+                throw new CharacteristicException("Characteristic not found with id: " + charId.toString());
+            }
+            if ((characteristic.getProperties() & BluetoothGattCharacteristic.PROPERTY_READ) != 0) {
+                characteristicToWriteQueue.add(charId);
+            }
+        }
         if (queueWasEmpty) {
             bluetoothGatt.readCharacteristic(getCharacteristicById(characteristicToWriteQueue.poll()));
         }
