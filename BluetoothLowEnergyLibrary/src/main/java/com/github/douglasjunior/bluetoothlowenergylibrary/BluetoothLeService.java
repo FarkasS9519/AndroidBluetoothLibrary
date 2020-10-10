@@ -214,6 +214,7 @@ public class BluetoothLeService extends BluetoothService {
                         updateDeviceName(gatt.getDevice());
                         updateState(BluetoothStatus.CONNECTED);
                         characteristicCommunicator.onAvailableCharacteristicsFound(characteristicIds);
+                        return;
                     }
                 }
                 Log.e(TAG, "Could not find uuidService:" + mConfig.uuidService + " and uuidCharacteristic:" + mConfig.uuidCharacteristic);
