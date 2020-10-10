@@ -118,12 +118,11 @@ public class BluetoothLeService extends BluetoothService {
             Log.v(TAG, "onCharacteristicRead: " + new String(data));
             if (BluetoothGatt.GATT_SUCCESS == status) {
                 characteristicCommunicator.onCharacteristicRead(characteristic.getUuid(), data);
-                if (!characteristicToWriteQueue.isEmpty()) {
-                    bluetoothGatt.readCharacteristic(getCharacteristicById(characteristicToWriteQueue.poll()));
-                }
             } else {
                 System.err.println("onCharacteristicRead error " + status);
-                characteristicToWriteQueue.poll();
+            }
+            if (!characteristicToWriteQueue.isEmpty()) {
+                bluetoothGatt.readCharacteristic(getCharacteristicById(characteristicToWriteQueue.poll()));
             }
         }
 
