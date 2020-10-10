@@ -6,7 +6,7 @@ import java.util.UUID;
 /**
  * Created by Sandor Farkas on 2020. 10. 10.
  */
-interface CharacteristicCommunicator {
+public interface CharacteristicCommunicator {
 
     void onCharacteristicWrote(UUID characteristicId, byte[] data);
     void onCharacteristicRead(UUID characteristicId, byte[] data);
