@@ -36,6 +36,8 @@ import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.content.Context;
 import android.os.Build;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.annotation.RequiresApi;
 import android.support.annotation.RequiresPermission;
 import android.util.Log;
@@ -65,11 +67,14 @@ public class BluetoothLeService extends BluetoothService {
     private final BluetoothAdapter btAdapter;
     private BluetoothGatt bluetoothGatt;
     private BluetoothGattCharacteristic characteristicRxTx;
+    private List<BluetoothGattCharacteristic> availableCharacteristics = new ArrayList<>();
 
     private final byte[] readBuffer;
     private int readBufferIndex = 0;
     private byte[][] writeBuffer;
     private int writeBufferIndex = 0;
+
+    private CharacteristicCommunicator characteristicCommunicator;
 
     private int maxTransferBytes = 20;
 
@@ -108,7 +113,7 @@ public class BluetoothLeService extends BluetoothService {
             final byte[] data = characteristic.getValue();
             Log.v(TAG, "onCharacteristicRead: " + new String(data));
             if (BluetoothGatt.GATT_SUCCESS == status) {
-                readData(data);
+                characteristicCommunicator.onCharacteristicRead(characteristic.getUuid(), data);
             } else {
                 System.err.println("onCharacteristicRead error " + status);
             }
@@ -118,16 +123,10 @@ public class BluetoothLeService extends BluetoothService {
         public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             super.onCharacteristicWrite(gatt, characteristic, status);
             final byte[] data = characteristic.getValue();
-            //Log.v(TAG, "onCharacteristicWrite status: " + status + " data: " + new String(data));
             Log.v(TAG, "onCharacteristicWrite status: " + status + " data: " + data.length);
             if (BluetoothGatt.GATT_SUCCESS == status || status == 11) {
                 if (onEventCallback != null)
-                    runOnMainThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            onEventCallback.onDataWrite(data);
-                        }
-                    });
+                    runOnMainThread(() -> characteristicCommunicator.onCharacteristicWrote(characteristic.getUuid(), data));
                 writeCharacteristic();
             } else {
                 System.err.println("onCharacteristicWrite error " + status);
@@ -149,7 +148,6 @@ public class BluetoothLeService extends BluetoothService {
                 updateState(BluetoothStatus.NONE);
             } else {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    //createBound(gatt.getDevice());
                     gatt.discoverServices();
                 } else if (newState == BluetoothProfile.STATE_CONNECTING) {
                     updateState(BluetoothStatus.CONNECTING);
@@ -191,32 +189,31 @@ public class BluetoothLeService extends BluetoothService {
                 for (BluetoothGattService service : gatt.getServices()) {
                     Log.v(TAG, "Service: " + service.getUuid());
                     if (mConfig.uuidService == null || service.getUuid().equals(mConfig.uuidService)) {
+                        characteristicCommunicator.onGattServiceDiscovered(service.getUuid());
+                        availableCharacteristics = new ArrayList<>(service.getCharacteristics());
+                        List<UUID> characteristicIds = new ArrayList<>();
                         for (BluetoothGattCharacteristic characteristic : service.getCharacteristics()) {
                             final int props = characteristic.getProperties();
                             Log.v(TAG, "Characteristic: " + characteristic.getUuid() +
                                     " PROPERTY_WRITE: " + (props & BluetoothGattCharacteristic.PROPERTY_WRITE) +
                                     " PROPERTY_WRITE_NO_RESPONSE: " + (props & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE));
-                            if (characteristic.getUuid().equals(mConfig.uuidCharacteristic)) {
-                                characteristicRxTx = characteristic;
-                                gatt.setCharacteristicNotification(characteristic, true);
-
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                                    // Request the MTU size to device.
-                                    // See also https://stackoverflow.com/questions/24135682/android-sending-data-20-bytes-by-ble
-                                    boolean requestMtu = bluetoothGatt.requestMtu(512);
-                                    Log.v(TAG, "requestMtu: " + requestMtu);
-
-                                    // Request a specific connection priority.
-                                    // CONNECTION_PRIORITY_BALANCED is the default value if no connection parameter update is requested
-                                    if (mConfig.connectionPriority != BluetoothGatt.CONNECTION_PRIORITY_BALANCED)
-                                        requestConnectionPriority(mConfig.connectionPriority);
-                                }
-
-                                updateDeviceName(gatt.getDevice());
-                                updateState(BluetoothStatus.CONNECTED);
-                                return;
-                            }
+                            characteristicRxTx = characteristic;
+                            characteristicIds.add(characteristic.getUuid());
+                            gatt.setCharacteristicNotification(characteristic, true);
                         }
+                        // Request the MTU size to device.
+                        // See also https://stackoverflow.com/questions/24135682/android-sending-data-20-bytes-by-ble
+                        boolean requestMtu = bluetoothGatt.requestMtu(512);
+                        Log.v(TAG, "requestMtu: " + requestMtu);
+
+                        // Request a specific connection priority.
+                        // CONNECTION_PRIORITY_BALANCED is the default value if no connection parameter update is requested
+                        if (mConfig.connectionPriority != BluetoothGatt.CONNECTION_PRIORITY_BALANCED) {
+                            requestConnectionPriority(mConfig.connectionPriority);
+                        }
+                        updateDeviceName(gatt.getDevice());
+                        updateState(BluetoothStatus.CONNECTED);
+                        characteristicCommunicator.onAvailableCharacteristicsFound(characteristicIds);
                     }
                 }
                 Log.e(TAG, "Could not find uuidService:" + mConfig.uuidService + " and uuidCharacteristic:" + mConfig.uuidCharacteristic);
@@ -227,77 +224,52 @@ public class BluetoothLeService extends BluetoothService {
             // If arrived here, no service or characteristic has been found.
             gatt.disconnect();
         }
-    };
 
-    @RequiresPermission(Manifest.permission.BLUETOOTH)
-    private void updateDeviceName(final BluetoothDevice device) {
-        if (onEventCallback != null)
-            runOnMainThread(new Runnable() {
-                @RequiresPermission(Manifest.permission.BLUETOOTH)
-                @Override
-                public void run() {
+        @RequiresPermission(Manifest.permission.BLUETOOTH)
+        private void updateDeviceName(final BluetoothDevice device) {
+            if (onEventCallback != null)
+                runOnMainThread(() -> {
                     BluetoothDevice dev = device;
                     if (dev.getName() == null)
                         dev = btAdapter.getRemoteDevice(dev.getAddress());
                     onEventCallback.onDeviceName(dev.getName());
+                });
+        }
+
+        private void readData(byte[] data) {
+            final byte byteDelimiter = (byte) mConfig.characterDelimiter;
+            for (byte temp : data) {
+
+                if (temp == byteDelimiter) {
+                    if (readBufferIndex > 0) {
+                        dispatchBuffer(readBuffer, readBufferIndex);
+                        readBufferIndex = 0;
+                    }
+                    continue;
                 }
-            });
-    }
-
-//    private void createBound(BluetoothDevice device) {
-//        try {
-//            if (device.getBondState() != BluetoothDevice.BOND_BONDED) {
-//                Method method = device.getClass().getMethod("createBond", (Class[]) null);
-//                method.invoke(device, (Object[]) null);
-//            }
-//        } catch (Exception e) {
-//            e.printStackTrace();
-//        }
-//    }
-
-    private void readData(byte[] data) {
-        final byte byteDelimiter = (byte) mConfig.characterDelimiter;
-        for (byte temp : data) {
-
-            if (temp == byteDelimiter) {
-                if (readBufferIndex > 0) {
+                if (readBufferIndex == readBuffer.length - 1) {
                     dispatchBuffer(readBuffer, readBufferIndex);
                     readBufferIndex = 0;
                 }
-                continue;
+                readBuffer[readBufferIndex] = temp;
+                readBufferIndex++;
+
             }
-            if (readBufferIndex == readBuffer.length - 1) {
-                dispatchBuffer(readBuffer, readBufferIndex);
-                readBufferIndex = 0;
+        }
+
+        private void dispatchBuffer(byte[] buffer, int i) {
+            final byte[] data = new byte[i];
+            System.arraycopy(buffer, 0, data, 0, i);
+            if (onEventCallback != null) {
+                runOnMainThread(() -> onEventCallback.onDataRead(data, data.length));
             }
-            readBuffer[readBufferIndex] = temp;
-            readBufferIndex++;
-
         }
-    }
 
-    private void dispatchBuffer(byte[] buffer, int i) {
-        final byte[] data = new byte[i];
-        System.arraycopy(buffer, 0, data, 0, i);
-        if (onEventCallback != null) {
-            runOnMainThread(new Runnable() {
-                @Override
-                public void run() {
-                    onEventCallback.onDataRead(data, data.length);
-                }
-            });
+        private void makeToast(final String message) {
+            if (onEventCallback != null)
+                runOnMainThread(() -> onEventCallback.onToast(message));
         }
-    }
-
-    private void makeToast(final String message) {
-        if (onEventCallback != null)
-            runOnMainThread(new Runnable() {
-                @Override
-                public void run() {
-                    onEventCallback.onToast(message);
-                }
-            });
-    }
+    };
 
     @RequiresPermission(Manifest.permission.BLUETOOTH)
     public void connect(BluetoothDevice bluetoothDevice) {
@@ -317,7 +289,7 @@ public class BluetoothLeService extends BluetoothService {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 // If android verion is greather or equal to Android M (23), then call the connectGatt with TRANSPORT_LE.
                 bluetoothGatt = bluetoothDevice.connectGatt(mConfig.context, false, btleGattCallback, mConfig.transport);
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            } else {
                 // From Android LOLLIPOP (21) the transport types exists, but them are hide for use,
                 // so is needed to use relfection to get the value
                 try {
@@ -361,12 +333,7 @@ public class BluetoothLeService extends BluetoothService {
             List<UUID> uuids = parseUUIDs(scanRecord);
             Log.v(TAG, "onLeScan " + device.getName() + " " + new String(scanRecord) + " -> uuids: " + uuids);
             if (onScanCallback != null && (mConfig.uuid == null || uuids.contains(mConfig.uuid))) {
-                runOnMainThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        onScanCallback.onDeviceDiscovered(device, rssi);
-                    }
-                });
+                runOnMainThread(() -> onScanCallback.onDeviceDiscovered(device, rssi));
             }
         }
 
@@ -376,12 +343,7 @@ public class BluetoothLeService extends BluetoothService {
     @Override
     public void startScan() {
         if (onScanCallback != null)
-            runOnMainThread(new Runnable() {
-                @Override
-                public void run() {
-                    onScanCallback.onStartScan();
-                }
-            });
+            runOnMainThread(() -> onScanCallback.onStartScan());
 
         btAdapter.stopLeScan(mLeScanCallback);
 
@@ -449,12 +411,7 @@ public class BluetoothLeService extends BluetoothService {
         btAdapter.stopLeScan(mLeScanCallback);
 
         if (onScanCallback != null)
-            runOnMainThread(new Runnable() {
-                @Override
-                public void run() {
-                    onScanCallback.onStopScan();
-                }
-            });
+            runOnMainThread(() -> onScanCallback.onStopScan());
     }
 
     public void stopService() {
@@ -472,15 +429,44 @@ public class BluetoothLeService extends BluetoothService {
             if (connectionPriority >= BluetoothGatt.CONNECTION_PRIORITY_BALANCED
                     && connectionPriority <= BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER) {
                 boolean requestConnectionPriority = bluetoothGatt.requestConnectionPriority(connectionPriority);
-                Log.v(TAG, "requestConnectionPriority("+connectionPriority+"): " + requestConnectionPriority);
+                Log.v(TAG, "requestConnectionPriority(" + connectionPriority + "): " + requestConnectionPriority);
             } else
-                Log.e(TAG, "requestConnectionPriority("+connectionPriority+"): ERROR - connectionPriority not within valid range");
+                Log.e(TAG, "requestConnectionPriority(" + connectionPriority + "): ERROR - connectionPriority not within valid range");
         }
+    }
+
+    public void readCharacteristics(@NonNull List<UUID> characteristicIdsToRead) throws CharacteristicException {
+        for (UUID characteristicId : characteristicIdsToRead) {
+            BluetoothGattCharacteristic characteristicToRead = getCharacteristicById(characteristicId);
+            if (characteristicToRead == null) {
+                throw new CharacteristicException("Characteristic not found with id: " + characteristicId.toString());
+            }
+            bluetoothGatt.readCharacteristic(characteristicToRead);
+        }
+    }
+
+    public void writeToCharacteristic(@NonNull byte[] data, @NonNull UUID characteristicId) throws CharacteristicException {
+        BluetoothGattCharacteristic characteristicToWrite = getCharacteristicById(characteristicId);
+        if (characteristicToWrite == null) {
+            throw new CharacteristicException("Characteristic not found with id: " + characteristicId.toString());
+        }
+        characteristicRxTx = characteristicToWrite;
+        write(data);
+    }
+
+    @Nullable
+    private BluetoothGattCharacteristic getCharacteristicById(UUID characteristicId) {
+        for (BluetoothGattCharacteristic characteristic : availableCharacteristics) {
+            if (characteristic.getUuid().equals(characteristicId)) {
+                return characteristic;
+            }
+        }
+        return null;
     }
 
     /**
      * Splits the bytes into packets according to the MTU size of the device, and writes the packets sequentially.
-     *
+     * <p>
      * See also https://stackoverflow.com/questions/24135682/android-sending-data-20-bytes-by-ble
      *
      * @param data
@@ -513,7 +499,6 @@ public class BluetoothLeService extends BluetoothService {
 
     /**
      * Writes next packet to the Characteristic.
-     *
      */
     private void writeCharacteristic() {
         Log.v(TAG, "writeCharacteristic " + writeBufferIndex);
@@ -531,4 +516,7 @@ public class BluetoothLeService extends BluetoothService {
         writeBufferIndex++;
     }
 
+    public void setCharacteristicCommunicator(CharacteristicCommunicator characteristicCommunicator) {
+        this.characteristicCommunicator = characteristicCommunicator;
+    }
 }
