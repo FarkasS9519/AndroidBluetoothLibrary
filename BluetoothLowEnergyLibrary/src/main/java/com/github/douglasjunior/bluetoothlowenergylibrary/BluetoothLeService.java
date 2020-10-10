@@ -56,6 +56,9 @@ import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.UUID;
 
+import static android.bluetooth.BluetoothGattCharacteristic.FORMAT_SFLOAT;
+import static android.bluetooth.BluetoothGattCharacteristic.FORMAT_UINT8;
+
 
 /**
  * Created by douglas on 16/03/15.
@@ -117,6 +120,9 @@ public class BluetoothLeService extends BluetoothService {
             final byte[] data = characteristic.getValue();
             Log.v(TAG, "onCharacteristicRead: " + new String(data));
             if (BluetoothGatt.GATT_SUCCESS == status) {
+                Log.wtf("INT VALUE", characteristic.getIntValue(FORMAT_UINT8, 0) + "");
+                Log.wtf("FLOAT VALUE", characteristic.getFloatValue(FORMAT_SFLOAT, 0) + "");
+                Log.wtf("INT VALUE", characteristic.getStringValue(0) + "");
                 characteristicCommunicator.onCharacteristicRead(characteristic.getUuid(), data);
             } else {
                 System.err.println("onCharacteristicRead error " + status);
