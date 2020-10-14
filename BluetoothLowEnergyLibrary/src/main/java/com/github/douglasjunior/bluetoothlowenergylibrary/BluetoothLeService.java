@@ -50,11 +50,10 @@ import com.github.douglasjunior.bluetoothclassiclibrary.BluetoothStatus;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.UUID;
@@ -73,8 +72,8 @@ public class BluetoothLeService extends BluetoothService {
     private BluetoothGatt bluetoothGatt;
     private List<BluetoothGattCharacteristic> availableCharacteristics = new ArrayList<>();
 
-    private Queue<UUID> characteristicToReadQueue = new PriorityQueue<>();
-    private Queue<Map.Entry<byte[], BluetoothGattCharacteristic>> characteristicToWriteQueue = new PriorityQueue<>();
+    private Queue<UUID> characteristicToReadQueue = new LinkedList<>();
+    private Queue<Pair<byte[], BluetoothGattCharacteristic>> characteristicToWriteQueue = new LinkedList<>();
 
     private final byte[] readBuffer;
     private int readBufferIndex = 0;
@@ -485,7 +484,7 @@ public class BluetoothLeService extends BluetoothService {
                     & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) == 0) {
                 continue;
             }
-            Map.Entry<byte[], BluetoothGattCharacteristic> payloadPairToWrite = new AbstractMap.SimpleEntry<>(payload.first, characteristicToWrite);
+            Pair<byte[], BluetoothGattCharacteristic> payloadPairToWrite = new Pair<>(payload.first, characteristicToWrite);
             characteristicToWriteQueue.add(payloadPairToWrite);
         }
         if (queueWasEmpty && !characteristicToWriteQueue.isEmpty()) {
@@ -508,8 +507,8 @@ public class BluetoothLeService extends BluetoothService {
      * <p>
      * See also https://stackoverflow.com/questions/24135682/android-sending-data-20-bytes-by-ble
      */
-    public void write(Map.Entry<byte[], BluetoothGattCharacteristic> payload) {
-        byte[] data = payload.getKey();
+    public void write(Pair<byte[], BluetoothGattCharacteristic> payload) {
+        byte[] data = payload.first;
         Log.v(TAG, "write: " + data.length);
         if (bluetoothGatt != null && mStatus == BluetoothStatus.CONNECTED) {
             if (data.length <= maxTransferBytes) {
@@ -531,7 +530,7 @@ public class BluetoothLeService extends BluetoothService {
                     writeBuffer[i] = Arrays.copyOfRange(data, start, end);
                 }
             }
-            writeCharacteristic(payload.getValue());
+            writeCharacteristic(payload.second);
         }
     }
 
