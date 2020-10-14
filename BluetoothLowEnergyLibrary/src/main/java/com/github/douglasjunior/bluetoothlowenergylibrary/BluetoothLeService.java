@@ -481,9 +481,10 @@ public class BluetoothLeService extends BluetoothService {
             if ((characteristicToWrite.getProperties() & BluetoothGattCharacteristic.PROPERTY_WRITE) == 0
                     && (characteristicToWrite.getProperties()
                     & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) == 0) {
-                Pair<byte[], BluetoothGattCharacteristic> payloadPairToWrite = new Pair<>(payload.first, characteristicToWrite);
-                characteristicToWriteQueue.add(payloadPairToWrite);
+                continue;
             }
+            Pair<byte[], BluetoothGattCharacteristic> payloadPairToWrite = new Pair<>(payload.first, characteristicToWrite);
+            characteristicToWriteQueue.add(payloadPairToWrite);
         }
         if (queueWasEmpty && !characteristicToWriteQueue.isEmpty()) {
             write(characteristicToWriteQueue.poll());
