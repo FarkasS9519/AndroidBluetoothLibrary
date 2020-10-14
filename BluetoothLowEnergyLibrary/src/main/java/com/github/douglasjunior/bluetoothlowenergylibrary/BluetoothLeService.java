@@ -41,6 +41,7 @@ import android.support.annotation.Nullable;
 import android.support.annotation.RequiresApi;
 import android.support.annotation.RequiresPermission;
 import android.util.Log;
+import android.util.Pair;
 
 import com.github.douglasjunior.bluetoothclassiclibrary.BluetoothConfiguration;
 import com.github.douglasjunior.bluetoothclassiclibrary.BluetoothService;
@@ -56,9 +57,6 @@ import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.UUID;
 
-import static android.bluetooth.BluetoothGattCharacteristic.FORMAT_SFLOAT;
-import static android.bluetooth.BluetoothGattCharacteristic.FORMAT_UINT8;
-
 
 /**
  * Created by douglas on 16/03/15.
@@ -71,10 +69,10 @@ public class BluetoothLeService extends BluetoothService {
 
     private final BluetoothAdapter btAdapter;
     private BluetoothGatt bluetoothGatt;
-    private BluetoothGattCharacteristic characteristicRxTx;
     private List<BluetoothGattCharacteristic> availableCharacteristics = new ArrayList<>();
 
-    private Queue<UUID> characteristicToWriteQueue = new PriorityQueue<>();
+    private Queue<UUID> characteristicToReadQueue = new PriorityQueue<>();
+    private Queue<Pair<byte[], BluetoothGattCharacteristic>> characteristicToWriteQueue = new PriorityQueue<>();
 
     private final byte[] readBuffer;
     private int readBufferIndex = 0;
@@ -88,8 +86,12 @@ public class BluetoothLeService extends BluetoothService {
     protected BluetoothLeService(BluetoothConfiguration config) {
         super(config);
         BluetoothManager btManager = (BluetoothManager) config.context.getSystemService(Context.BLUETOOTH_SERVICE);
-        btAdapter = btManager.getAdapter();
-        readBuffer = new byte[config.bufferSize];
+        if (btManager != null) {
+            btAdapter = btManager.getAdapter();
+            readBuffer = new byte[config.bufferSize];
+        } else {
+            throw new BluetoothManagerException("Bluetooth manager was not found, phone probably does not support bluetooth operations!");
+        }
     }
 
     private final BluetoothGattCallback btleGattCallback = new BluetoothGattCallback() {
@@ -120,15 +122,12 @@ public class BluetoothLeService extends BluetoothService {
             final byte[] data = characteristic.getValue();
             Log.v(TAG, "onCharacteristicRead: " + new String(data));
             if (BluetoothGatt.GATT_SUCCESS == status) {
-                Log.wtf("INT VALUE", characteristic.getIntValue(FORMAT_UINT8, 0) + "");
-                Log.wtf("FLOAT VALUE", characteristic.getFloatValue(FORMAT_SFLOAT, 0) + "");
-                Log.wtf("INT VALUE", characteristic.getStringValue(0) + "");
                 characteristicCommunicator.onCharacteristicRead(characteristic.getUuid(), data);
             } else {
-                System.err.println("onCharacteristicRead error " + status);
+                Log.wtf(TAG, "onCharacteristicRead error " + status);
             }
-            if (!characteristicToWriteQueue.isEmpty()) {
-                bluetoothGatt.readCharacteristic(getCharacteristicById(characteristicToWriteQueue.poll()));
+            if (!characteristicToReadQueue.isEmpty()) {
+                bluetoothGatt.readCharacteristic(getCharacteristicById(characteristicToReadQueue.poll()));
             }
         }
 
@@ -138,13 +137,13 @@ public class BluetoothLeService extends BluetoothService {
             final byte[] data = characteristic.getValue();
             Log.v(TAG, "onCharacteristicWrite status: " + status + " data: " + data.length);
             if (BluetoothGatt.GATT_SUCCESS == status || status == 11) {
-                if (onEventCallback != null)
-                    runOnMainThread(() -> characteristicCommunicator.onCharacteristicWrote(characteristic.getUuid(), data));
-                writeCharacteristic();
+                characteristicCommunicator.onCharacteristicWrote(characteristic.getUuid(), data);
             } else {
-                System.err.println("onCharacteristicWrite error " + status);
+                Log.wtf(TAG, "onCharacteristicWrite error " + status);
             }
-
+            if (!characteristicToWriteQueue.isEmpty()) {
+                write(characteristicToWriteQueue.poll());
+            }
         }
 
         @RequiresPermission(Manifest.permission.BLUETOOTH)
@@ -210,7 +209,6 @@ public class BluetoothLeService extends BluetoothService {
                             Log.v(TAG, "Characteristic: " + characteristic.getUuid() +
                                     " PROPERTY_WRITE: " + (props & BluetoothGattCharacteristic.PROPERTY_WRITE) +
                                     " PROPERTY_WRITE_NO_RESPONSE: " + (props & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE));
-                            characteristicRxTx = characteristic;
                             characteristicIds.add(characteristic.getUuid());
                             gatt.setCharacteristicNotification(characteristic, true);
                         }
@@ -329,6 +327,15 @@ public class BluetoothLeService extends BluetoothService {
         }
     }
 
+    /**
+     * @deprecated
+     */
+    @Override
+    @Deprecated
+    public void write(byte[] bytes) {
+        // Deprecated
+    }
+
     @RequiresPermission(Manifest.permission.BLUETOOTH_ADMIN)
     final Runnable mStopScanRunnable = new Runnable() {
         @RequiresPermission(Manifest.permission.BLUETOOTH_ADMIN)
@@ -401,7 +408,6 @@ public class BluetoothLeService extends BluetoothService {
                         } catch (IndexOutOfBoundsException e) {
                             // Defensive programming.
                             Log.e(TAG, e.toString());
-                            continue;
                         } finally {
                             // Move the offset to read the next uuid.
                             offset += 15;
@@ -450,28 +456,38 @@ public class BluetoothLeService extends BluetoothService {
     }
 
     public void readCharacteristics(@NonNull List<UUID> characteristicIdsToRead) throws CharacteristicException {
-        boolean queueWasEmpty = characteristicToWriteQueue.isEmpty();
+        boolean queueWasEmpty = characteristicToReadQueue.isEmpty();
         for (UUID charId : characteristicIdsToRead) {
-            BluetoothGattCharacteristic characteristic = getCharacteristicById(charId);
-            if (characteristic == null) {
+            BluetoothGattCharacteristic characteristicToRead = getCharacteristicById(charId);
+            if (characteristicToRead == null) {
                 throw new CharacteristicException("Characteristic not found with id: " + charId.toString());
             }
-            if ((characteristic.getProperties() & BluetoothGattCharacteristic.PROPERTY_READ) != 0) {
-                characteristicToWriteQueue.add(charId);
+            if ((characteristicToRead.getProperties() & BluetoothGattCharacteristic.PROPERTY_READ) != 0) {
+                characteristicToReadQueue.add(charId);
             }
         }
-        if (queueWasEmpty) {
-            bluetoothGatt.readCharacteristic(getCharacteristicById(characteristicToWriteQueue.poll()));
+        if (queueWasEmpty && !characteristicToReadQueue.isEmpty()) {
+            bluetoothGatt.readCharacteristic(getCharacteristicById(characteristicToReadQueue.poll()));
         }
     }
 
-    public void writeToCharacteristic(@NonNull byte[] data, @NonNull UUID characteristicId) throws CharacteristicException {
-        BluetoothGattCharacteristic characteristicToWrite = getCharacteristicById(characteristicId);
-        if (characteristicToWrite == null) {
-            throw new CharacteristicException("Characteristic not found with id: " + characteristicId.toString());
+    public final void writeToCharacteristic(@NonNull List<Pair<byte[], UUID>> payloadPairs) throws CharacteristicException {
+        boolean queueWasEmpty = characteristicToWriteQueue.isEmpty();
+        for (Pair<byte[], UUID> payload : payloadPairs) {
+            BluetoothGattCharacteristic characteristicToWrite = getCharacteristicById(payload.second);
+            if (characteristicToWrite == null) {
+                throw new CharacteristicException("Characteristic not found with id: " + payload.second.toString());
+            }
+            if ((characteristicToWrite.getProperties() & BluetoothGattCharacteristic.PROPERTY_WRITE) == 0
+                    && (characteristicToWrite.getProperties()
+                    & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) == 0) {
+                Pair<byte[], BluetoothGattCharacteristic> payloadPairToWrite = new Pair<>(payload.first, characteristicToWrite);
+                characteristicToWriteQueue.add(payloadPairToWrite);
+            }
         }
-        characteristicRxTx = characteristicToWrite;
-        write(data);
+        if (queueWasEmpty && !characteristicToWriteQueue.isEmpty()) {
+            write(characteristicToWriteQueue.poll());
+        }
     }
 
     @Nullable
@@ -488,12 +504,11 @@ public class BluetoothLeService extends BluetoothService {
      * Splits the bytes into packets according to the MTU size of the device, and writes the packets sequentially.
      * <p>
      * See also https://stackoverflow.com/questions/24135682/android-sending-data-20-bytes-by-ble
-     *
-     * @param data
      */
-    public void write(byte[] data) {
+    public void write(Pair<byte[], BluetoothGattCharacteristic> payload) {
+        byte[] data = payload.first;
         Log.v(TAG, "write: " + data.length);
-        if (bluetoothGatt != null && characteristicRxTx != null && mStatus == BluetoothStatus.CONNECTED) {
+        if (bluetoothGatt != null && mStatus == BluetoothStatus.CONNECTED) {
             if (data.length <= maxTransferBytes) {
                 writeBufferIndex = 0;
                 writeBuffer = new byte[1][data.length];
@@ -513,24 +528,24 @@ public class BluetoothLeService extends BluetoothService {
                     writeBuffer[i] = Arrays.copyOfRange(data, start, end);
                 }
             }
-            writeCharacteristic();
+            writeCharacteristic(payload.second);
         }
     }
 
     /**
      * Writes next packet to the Characteristic.
      */
-    private void writeCharacteristic() {
+    private void writeCharacteristic(BluetoothGattCharacteristic characteristic) {
         Log.v(TAG, "writeCharacteristic " + writeBufferIndex);
         if (writeBufferIndex >= writeBuffer.length)
             return;
 
         byte[] bytes = writeBuffer[writeBufferIndex];
 
-        boolean setValue = characteristicRxTx.setValue(bytes);
+        boolean setValue = characteristic.setValue(bytes);
         Log.v(TAG, "setValue: " + setValue);
 
-        boolean writeCharacteristic = bluetoothGatt.writeCharacteristic(characteristicRxTx);
+        boolean writeCharacteristic = bluetoothGatt.writeCharacteristic(characteristic);
         Log.v(TAG, "writeCharacteristic: " + writeCharacteristic);
 
         writeBufferIndex++;
