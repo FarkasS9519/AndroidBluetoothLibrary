@@ -458,7 +458,7 @@ public class BluetoothLeService extends BluetoothService {
 
     public void readCharacteristics(@NonNull List<UUID> characteristicIdsToRead) throws CharacteristicException {
         boolean queueWasEmpty = characteristicToReadQueue.isEmpty();
-        boolean readingStuck = characteristicToReadQueue.size() >= 20;
+        boolean readingStuck = characteristicToReadQueue.size() >= 6;
         for (UUID charId : characteristicIdsToRead) {
             BluetoothGattCharacteristic characteristicToRead = getCharacteristicById(charId);
             if (characteristicToRead == null) {
@@ -475,7 +475,7 @@ public class BluetoothLeService extends BluetoothService {
 
     public final void writeToCharacteristic(@NonNull List<Pair<byte[], UUID>> payloadPairs) throws CharacteristicException {
         boolean queueWasEmpty = characteristicToWriteQueue.isEmpty();
-        boolean writingStuck = characteristicToWriteQueue.size() >= 20;
+        boolean writingStuck = characteristicToWriteQueue.size() >= 6;
         for (Pair<byte[], UUID> payload : payloadPairs) {
             BluetoothGattCharacteristic characteristicToWrite = getCharacteristicById(payload.second);
             if (characteristicToWrite == null) {
