@@ -458,6 +458,7 @@ public class BluetoothLeService extends BluetoothService {
 
     public void readCharacteristics(@NonNull List<UUID> characteristicIdsToRead) throws CharacteristicException {
         boolean queueWasEmpty = characteristicToReadQueue.isEmpty();
+        boolean readingStuck = characteristicToReadQueue.size() >= 20;
         for (UUID charId : characteristicIdsToRead) {
             BluetoothGattCharacteristic characteristicToRead = getCharacteristicById(charId);
             if (characteristicToRead == null) {
@@ -467,13 +468,14 @@ public class BluetoothLeService extends BluetoothService {
                 characteristicToReadQueue.add(charId);
             }
         }
-        if (queueWasEmpty && !characteristicToReadQueue.isEmpty()) {
+        if ((queueWasEmpty && !characteristicToReadQueue.isEmpty()) || readingStuck) {
             bluetoothGatt.readCharacteristic(getCharacteristicById(characteristicToReadQueue.poll()));
         }
     }
 
     public final void writeToCharacteristic(@NonNull List<Pair<byte[], UUID>> payloadPairs) throws CharacteristicException {
         boolean queueWasEmpty = characteristicToWriteQueue.isEmpty();
+        boolean writingStuck = characteristicToWriteQueue.size() >= 20;
         for (Pair<byte[], UUID> payload : payloadPairs) {
             BluetoothGattCharacteristic characteristicToWrite = getCharacteristicById(payload.second);
             if (characteristicToWrite == null) {
@@ -487,7 +489,7 @@ public class BluetoothLeService extends BluetoothService {
             Pair<byte[], BluetoothGattCharacteristic> payloadPairToWrite = new Pair<>(payload.first, characteristicToWrite);
             characteristicToWriteQueue.add(payloadPairToWrite);
         }
-        if (queueWasEmpty && !characteristicToWriteQueue.isEmpty()) {
+        if ((queueWasEmpty && !characteristicToWriteQueue.isEmpty()) || writingStuck) {
             write(characteristicToWriteQueue.poll());
         }
     }
