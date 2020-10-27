@@ -66,7 +66,7 @@ public class BluetoothLeService extends BluetoothService {
 
     private static final String TAG = BluetoothLeService.class.getSimpleName();
 
-    private static final long SCAN_PERIOD = 10000;
+    private static final long SCAN_PERIOD = 15000;
 
     private final BluetoothAdapter btAdapter;
     private BluetoothGatt bluetoothGatt;
