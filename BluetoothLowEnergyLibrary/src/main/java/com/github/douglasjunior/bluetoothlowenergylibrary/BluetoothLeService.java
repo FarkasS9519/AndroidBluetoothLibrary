@@ -66,7 +66,7 @@ public class BluetoothLeService extends BluetoothService {
 
     private static final String TAG = BluetoothLeService.class.getSimpleName();
 
-    private static final long SCAN_PERIOD = 20000;
+    private static long SCAN_PERIOD = 20000;
 
     private final BluetoothAdapter btAdapter;
     private BluetoothGatt bluetoothGatt;
@@ -553,6 +553,10 @@ public class BluetoothLeService extends BluetoothService {
         Log.v(TAG, "writeCharacteristic: " + writeCharacteristic);
 
         writeBufferIndex++;
+    }
+
+    public static void setScanPeriod(long scanPeriod) {
+        SCAN_PERIOD = scanPeriod;
     }
 
     public void setCharacteristicCommunicator(CharacteristicCommunicator characteristicCommunicator) {
