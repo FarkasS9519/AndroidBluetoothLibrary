@@ -114,6 +114,8 @@ public class BluetoothConfiguration {
      */
     public int connectionPriority;
 
+    public boolean shouldUseSecureConnection = false;
+
     public BluetoothConfiguration() {
         setDefaultTransport();
     }

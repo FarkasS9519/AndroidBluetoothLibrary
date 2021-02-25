@@ -230,7 +230,11 @@ public class BluetoothClassicService extends BluetoothService {
 
             // Get a BluetoothSocket for a connection with the given BluetoothDevice
             try {
-                tmp = device.createRfcommSocketToServiceRecord(mConfig.uuid);
+                if (getConfiguration().shouldUseSecureConnection) {
+                    tmp = device.createRfcommSocketToServiceRecord(mConfig.uuid);
+                } else {
+                    tmp = device.createInsecureRfcommSocketToServiceRecord(mConfig.uuid);
+                }
             } catch (Exception e) {
                 Log.e(TAG, "create() failed", e);
             }
