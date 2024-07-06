@@ -21,9 +21,11 @@ android {
     }
     productFlavors {
     }
+
+    namespace 'com.github.douglasjunior.bluetoothlowenergylibrary'
 }
 
 dependencies {
-    compile project(':BluetoothClassicLibrary')
-    compile 'com.android.support:support-annotations:28.0.0'
+    implementation project(':BluetoothClassicLibrary')
+    implementation 'com.android.support:support-annotations:28.0.0'
 }
